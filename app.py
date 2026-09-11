@@ -80,6 +80,19 @@ st.markdown("""
     [data-baseweb="select"] * { color: var(--ink) !important; }
     [data-baseweb="popover"] * { color: var(--ink) !important; }
     [data-baseweb="popover"] { background: #FFFFFF !important; }
+    /* Broader catch: the dropdown/select MENU specifically (a different
+       BaseWeb element from the popover wrapper) is where black-on-black
+       options were hiding — this targets it directly and exhaustively */
+    [data-baseweb="menu"], [data-baseweb="menu"] *,
+    [role="listbox"], [role="listbox"] *,
+    [role="option"], [role="option"] *,
+    ul[data-baseweb="menu"] li {
+        background: #FFFFFF !important;
+        color: var(--ink) !important;
+    }
+    [role="option"]:hover, li[role="option"]:hover {
+        background: var(--paper-2) !important;
+    }
     /* Dataframe / table text */
     [data-testid="stDataFrame"] * { color: var(--ink) !important; }
     [data-testid="stDataFrame"] { background: #FFFFFF !important; }
@@ -122,6 +135,28 @@ st.markdown("""
        set to ink color is never stranded on a dark surface */
     [data-testid="stExpander"], [role="dialog"], [role="tooltip"] {
         background: #FFFFFF !important;
+    }
+
+    /* ---- ROUND 3: eliminate ANY remaining black background patches,
+       wherever they come from (browser dark-mode defaults on unstyled
+       containers, iframes, etc.) by forcing every generic container
+       and the base HTML/body to the light paper color explicitly. ---- */
+    html, body {
+        background: var(--paper) !important;
+        color-scheme: light !important;
+    }
+    .main, .block-container, [data-testid="stAppViewContainer"],
+    [data-testid="stAppViewBlockContainer"], [data-testid="stVerticalBlock"],
+    [data-testid="stHorizontalBlock"], [data-testid="stElementContainer"],
+    section[data-testid="stSidebar"] {
+        background: var(--paper) !important;
+    }
+    /* Tabs container specifically (a common source of a stray dark strip) */
+    .stTabs, [data-baseweb="tab-list"], [data-baseweb="tab-panel"] {
+        background: var(--paper) !important;
+    }
+    [data-baseweb="tab-list"] button {
+        background: transparent !important;
     }
 
     /* The letterhead banner is dark navy — its own text must stay light.
@@ -408,7 +443,8 @@ if data is not None:
     
     # ---- SECTION 1: Summary metrics ----
     st.markdown("---")
-    st.markdown("### Portfolio Summary")
+    st.markdown("### Overview — the whole batch, at a glance")
+    st.caption("A quick summary of every invoice you scored, so you can judge the overall health of this portfolio in one look.")
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -433,7 +469,8 @@ if data is not None:
     # ---- SECTION 2: The separation proof (only if outcomes are available) ----
     if has_outcomes:
         st.markdown("---")
-        st.markdown("### The Proof: Do Defaults Cluster in Low Scores?")
+        st.markdown("### Does the score actually work?")
+        st.caption("The real test: invoices we scored as risky should have failed more often than invoices we scored as safe. This is where you check that.")
         st.markdown("If the model works, the red (default) rate should be high in the left band and near zero on the right.")
         
         band_col1, band_col2, band_col3 = st.columns(3)
@@ -478,7 +515,8 @@ if data is not None:
     
     # ---- SECTION 3: Score distribution chart ----
     st.markdown("---")
-    st.markdown("### Score Distribution")
+    st.markdown("### How scores are spread out")
+    st.caption("Shows how many invoices landed in each score range — helps you see if most invoices are safe, risky, or somewhere in between.")
     
     score_df = pd.DataFrame([{
         "Score": r["score"],
@@ -496,7 +534,8 @@ if data is not None:
     
     # ---- SECTION 4: Every invoice, scored ----
     st.markdown("---")
-    st.markdown("### Every Invoice, Scored")
+    st.markdown("### Full list — every invoice and its score")
+    st.caption("Every invoice you scored, sorted from riskiest to safest, with the top reason for each score.")
     st.markdown("Click any row to see the full reasoning.")
     
     # Build display dataframe
@@ -538,7 +577,8 @@ if data is not None:
     
     # ---- SECTION 5: Deep dive on a single invoice ----
     st.markdown("---")
-    st.markdown("### Invoice Deep Dive")
+    st.markdown("### Look at one invoice closely")
+    st.caption("Pick any single invoice below to see exactly why it got the score it did, signal by signal.")
     
     invoice_ids = [r["invoice"].get("invoice_id", f"Invoice {i}") for i, r in enumerate(scored)]
     selected_id = st.selectbox("Select an invoice to see full reasoning:", invoice_ids)
@@ -587,7 +627,8 @@ if data is not None:
     
     # ---- SECTION 6: Buyer-level aggregation ----
     st.markdown("---")
-    st.markdown("### Buyer Risk Map")
+    st.markdown("### Which buyers are risky?")
+    st.caption("Groups all invoices by buyer, so you can see at a glance which buyers tend to pay reliably and which don't.")
     st.markdown("Which buyers are your riskiest? Aggregated across all their invoices.")
     
     buyer_stats = {}
