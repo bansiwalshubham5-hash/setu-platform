@@ -1,17 +1,14 @@
 """
 Setu Invoice Trust Scoring Engine — Version 2
 ===============================================
-Updated with real government document field names and the NEW
-e-way bill closure signal (GSTN Advisory 664, effective Aug 1 2026).
-
-Seven signals now (was five):
+Seven signals:
 1. Buyer payment history (highest weight — direct evidence)
 2. Buyer ITC claim status (acceptance proxy from GSTR-2B)
 3. Buyer average days late (severity of delay pattern)
 4. E-way bill present (dispatch proof from EWB-01)
-5. E-way bill CLOSED (NEW — delivery confirmation, Aug 1 2026)
+5. E-way bill CLOSED (delivery confirmation, Aug 1 2026 GSTN facility)
 6. E-invoice IRN valid (fraud check from Form GST INV-01)
-7. Buyer GSTR-3B filing pattern (NEW — financial health leading indicator)
+7. Buyer GSTR-3B filing pattern (financial health leading indicator)
 """
 
 
@@ -69,19 +66,19 @@ def score_invoice(invoice: dict) -> dict:
     eway = str(invoice.get("eway_bill_present", "No")).strip().lower()
     if eway in ("yes", "true", "1"):
         score += 8
-        ewb_num = str(invoice.get("eway_bill_number", "")).split(".")[0]  # handles pandas float coercion
+        ewb_num = str(invoice.get("eway_bill_number", "")).split(".")[0]
         reasons.append({"type": "positive", "text": f"E-way bill confirmed (EWB {ewb_num[:6]}...) — dispatch verified"})
     else:
         score -= 10
         reasons.append({"type": "negative", "text": "No e-way bill — dispatch not independently confirmed"})
     
-    # --- SIGNAL 5: E-way bill CLOSURE (NEW — +7 / -3 points) ---
+    # --- SIGNAL 5: E-way bill CLOSURE (+7 / -3 points) ---
     ewb_closed = str(invoice.get("eway_bill_closed", "No")).strip().lower()
-    if eway in ("yes", "true", "1"):  # Only relevant if EWB exists
+    if eway in ("yes", "true", "1"):
         if ewb_closed in ("yes", "true", "1"):
             score += 7
             closure_date = invoice.get("ewb_closure_date", "")
-            reasons.append({"type": "positive", "text": f"E-way bill CLOSED on {closure_date} — delivery confirmed (GSTN Aug 2026)"})
+            reasons.append({"type": "positive", "text": f"E-way bill CLOSED on {closure_date} — delivery confirmed"})
         else:
             score -= 3
             reasons.append({"type": "neutral", "text": "E-way bill not closed — delivery not formally confirmed"})
@@ -89,17 +86,17 @@ def score_invoice(invoice: dict) -> dict:
     # --- SIGNAL 6: E-invoice IRN (±8 points) ---
     irn_raw = invoice.get("irn", "")
     irn = "" if (irn_raw is None or (isinstance(irn_raw, float) and irn_raw != irn_raw)) else str(irn_raw).strip()
-    if len(irn) == 64:  # Real IRN is a 64-char SHA256 hash
+    if len(irn) == 64:
         score += 8
         reasons.append({"type": "positive", "text": f"Valid IRN ({irn[:8]}...) — invoice government-verified"})
-    elif irn and len(irn) > 0:
+    elif irn:
         score += 4
         reasons.append({"type": "neutral", "text": "IRN present but format unclear"})
     else:
         score -= 6
         reasons.append({"type": "negative", "text": "No IRN — invoice not registered with IRP"})
     
-    # --- SIGNAL 7: Buyer GSTR-3B filing pattern (NEW — ±6 points) ---
+    # --- SIGNAL 7: Buyer GSTR-3B filing pattern (±6 points) ---
     filing = str(invoice.get("buyer_gstr3b_filing", "unknown")).strip().lower()
     if filing == "on_time":
         score += 6
@@ -111,19 +108,17 @@ def score_invoice(invoice: dict) -> dict:
         score -= 6
         reasons.append({"type": "negative", "text": "Buyer GSTR-3B severely delayed — strong distress signal"})
     
-    # Clamp
     score = max(2, min(98, score))
     
-    # Risk band
     if score >= 70:
         band = "High Trust"
-        recommendation = "Low risk. Suitable for financing at standard rates."
+        recommendation = "Low risk. This invoice is suitable for financing at standard rates."
     elif score >= 50:
         band = "Watch"
-        recommendation = "Moderate risk. Consider higher holdback or closer monitoring."
+        recommendation = "Moderate risk. Consider financing with a higher holdback or closer monitoring."
     else:
         band = "High Risk"
-        recommendation = "High risk. Significant warning signals. Finance with caution or decline."
+        recommendation = "High risk. This invoice has significant warning signals. Finance with caution or decline."
     
     return {
         "score": score,
