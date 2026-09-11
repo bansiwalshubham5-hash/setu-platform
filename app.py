@@ -99,7 +99,20 @@ st.markdown("""
     /* Metric widgets already targeted below, reinforced here */
     [data-testid="stMetric"] label, [data-testid="stMetric"] div { color: var(--ink) !important; }
     /* File uploader button text */
-    [data-testid="stFileUploader"] button { color: var(--ink) !important; }
+    /* File uploader "Browse files" button: it has Streamlit's default blue
+       background — force the text AND any icon inside it to white so it's
+       readable, instead of the ink-on-blue that was still hard to see */
+    [data-testid="stFileUploader"] button {
+        color: #FFFFFF !important;
+    }
+    [data-testid="stFileUploader"] button * {
+        color: #FFFFFF !important;
+        fill: #FFFFFF !important;
+    }
+    [data-testid="stFileUploader"] button svg {
+        fill: #FFFFFF !important;
+        stroke: #FFFFFF !important;
+    }
     /* Alert boxes (success/warning/error) keep readable dark text on their tint */
     [data-testid="stAlert"] p, [data-testid="stAlert"] div { color: var(--ink) !important; }
 
@@ -401,15 +414,17 @@ st.markdown(f"""
 
 
 
-# ---- Data source selection ----
-tab1, tab2 = st.tabs(["📊 Run Backtest on Sample Data", "📁 Upload Your Own Data"])
+# ---- Data source selection — both options visible at once, no hidden tabs ----
+col_left, col_right = st.columns(2)
 
-with tab1:
+with col_left:
+    st.markdown("**Run on sample data**")
     st.markdown("Score 200 real-shaped auto-component invoices from Pune-Chakan. Each one has a known result — paid or not — so you can see whether the score actually caught it.")
     use_sample = st.button("Run scoring on sample data", type="primary", key="sample_btn")
 
-with tab2:
-    st.markdown("**Upload your own invoices** — a CSV with buyer name, invoice value, and a few payment-history details. Add an outcome column if you want to check the score against real results.")
+with col_right:
+    st.markdown("**Upload your own data**")
+    st.markdown("A CSV with buyer name, invoice value, and a few payment-history details. Add an outcome column if you want to check the score against real results.")
     uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"], key="upload")
 
 
@@ -528,84 +543,10 @@ if data is not None:
     chart_data["Score range"] = chart_data["Score range"].astype(str)
     st.bar_chart(chart_data.set_index("Score range"), x_label="Score range", y_label="Number of invoices")
     
-    # ---- SECTION 4: Every invoice, scored ----
+    # ---- SECTION 4+5 combined: All invoices, click through to detail ----
     st.markdown("---")
-    st.markdown("### All invoices")
-    st.markdown("Click any row to see the full reasoning.")
     
-    # Build a custom HTML table instead of st.dataframe — Streamlit's built-in
-    # grid renders on a canvas element, which CSS cannot style reliably
-    # (this was the actual cause of the invisible search box and unreadable
-    # headers). A plain HTML table gives full, guaranteed control.
-    table_rows_html = ""
-    for r in sorted(scored, key=lambda x: x["score"]):
-        inv = r["invoice"]
-        
-        if r["score"] >= 70:
-            score_color = "var(--trust)"
-            score_emoji = "🟢"
-        elif r["score"] >= 50:
-            score_color = "var(--watch)"
-            score_emoji = "🟡"
-        else:
-            score_color = "var(--risk)"
-            score_emoji = "🔴"
-        
-        top_reason = r["reasons"][0]["text"] if r["reasons"] else ""
-        value_str = f"₹{int(float(inv.get('total_invoice_value', inv.get('invoice_value', 0)))):,}"
-        
-        outcome_cell = ""
-        if has_outcomes:
-            outcome = inv.get("outcome", "")
-            outcome_color = "var(--trust)" if outcome == "Repaid" else "var(--risk)"
-            outcome_symbol = "✓" if outcome == "Repaid" else "✕"
-            outcome_cell = f'<td style="padding:8px 10px; color:{outcome_color}; font-weight:600;">{outcome_symbol} {outcome}</td>'
-        
-        table_rows_html += f'''<tr style="border-top:1px solid var(--line);">
-            <td style="padding:8px 10px; color:var(--ink); font-family:\'IBM Plex Mono\',monospace;">{inv.get("invoice_id","")}</td>
-            <td style="padding:8px 10px; color:var(--ink);">{inv.get("buyer_name","")}</td>
-            <td style="padding:8px 10px; color:var(--ink); font-family:\'IBM Plex Mono\',monospace;">{value_str}</td>
-            <td style="padding:8px 10px; color:{score_color}; font-weight:700; font-family:\'IBM Plex Mono\',monospace;">{score_emoji} {r["score"]}</td>
-            <td style="padding:8px 10px; color:{score_color}; font-weight:600;">{r["band"]}</td>
-            <td style="padding:8px 10px; color:var(--muted); font-size:0.85rem;">{top_reason}</td>
-            {outcome_cell}
-        </tr>'''
-    
-    outcome_header = '<th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Outcome</th>' if has_outcomes else ""
-    
-    table_html = f'''
-    <div style="max-height:500px; overflow-y:auto; border:1px solid var(--line); border-radius:8px;">
-    <table style="width:100%; border-collapse:collapse; font-family:'IBM Plex Sans',sans-serif; font-size:0.9rem;">
-        <thead style="position:sticky; top:0; z-index:1;">
-            <tr style="background:var(--ink);">
-                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Invoice</th>
-                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Buyer</th>
-                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Value</th>
-                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Score</th>
-                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Band</th>
-                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Top signal</th>
-                {outcome_header}
-            </tr>
-        </thead>
-        <tbody style="background:#FFFFFF;">
-            {table_rows_html}
-        </tbody>
-    </table>
-    </div>
-    '''
-    st.markdown(table_html, unsafe_allow_html=True)
-    
-    # ---- SECTION 5: Deep dive on a single invoice ----
-    st.markdown("---")
-    st.markdown("### Each invoice")
-    
-    invoice_ids = [r["invoice"].get("invoice_id", f"Invoice {i}") for i, r in enumerate(scored)]
-    selected_id = st.selectbox("Choose an invoice:", invoice_ids)
-    
-    if selected_id:
-        selected = next(r for r in scored if r["invoice"].get("invoice_id") == selected_id)
-        inv = selected["invoice"]
-        
+    def render_invoice_card(selected, inv, has_outcomes):
         score_val = selected["score"]
         if score_val >= 70:
             score_color = "var(--trust)"
@@ -639,7 +580,7 @@ if data is not None:
         
         value_str = f"₹{int(float(inv.get('total_invoice_value', inv.get('invoice_value', 0)))):,}"
         
-        card_html = f'''
+        return f'''
         <div style="background:#FFFFFF; border:1px solid var(--line); border-radius:12px; padding:20px 24px; margin-top:8px;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
                 <div>
@@ -662,7 +603,54 @@ if data is not None:
             </div>
         </div>
         '''
-        st.markdown(card_html, unsafe_allow_html=True)
+    
+    if "selected_invoice_id" not in st.session_state:
+        st.session_state["selected_invoice_id"] = None
+    
+    if st.session_state["selected_invoice_id"]:
+        # ---- Detail view for one invoice ----
+        st.markdown("### Invoice detail")
+        if st.button("← Back to all invoices"):
+            st.session_state["selected_invoice_id"] = None
+            st.rerun()
+        
+        selected = next((r for r in scored if r["invoice"].get("invoice_id") == st.session_state["selected_invoice_id"]), None)
+        if selected:
+            inv = selected["invoice"]
+            st.markdown(render_invoice_card(selected, inv, has_outcomes), unsafe_allow_html=True)
+    
+    else:
+        # ---- Table view — click View on any row to open its detail ----
+        st.markdown("### All invoices")
+        st.markdown("Click **View** on any row to see the full reasoning.")
+        
+        header_cols = st.columns([1.3, 1.6, 1, 0.8, 1, 2, 0.7])
+        headers = ["Invoice", "Buyer", "Value", "Score", "Band", "Top signal", ""]
+        for c, h in zip(header_cols, headers):
+            c.markdown(f"<div style='background:var(--ink); color:#FFFFFF; padding:6px 8px; font-weight:700; font-size:0.8rem; border-radius:4px;'>{h}</div>", unsafe_allow_html=True)
+        
+        for idx, r in enumerate(sorted(scored, key=lambda x: x["score"])):
+            inv = r["invoice"]
+            if r["score"] >= 70:
+                score_color = "var(--trust)"; score_emoji = "🟢"
+            elif r["score"] >= 50:
+                score_color = "var(--watch)"; score_emoji = "🟡"
+            else:
+                score_color = "var(--risk)"; score_emoji = "🔴"
+            
+            top_reason = r["reasons"][0]["text"] if r["reasons"] else ""
+            value_str = f"₹{int(float(inv.get('total_invoice_value', inv.get('invoice_value', 0)))):,}"
+            
+            row_cols = st.columns([1.3, 1.6, 1, 0.8, 1, 2, 0.7])
+            row_cols[0].markdown(f"<span style='color:var(--ink); font-family:monospace; font-size:0.85rem;'>{inv.get('invoice_id','')}</span>", unsafe_allow_html=True)
+            row_cols[1].markdown(f"<span style='color:var(--ink); font-size:0.85rem;'>{inv.get('buyer_name','')}</span>", unsafe_allow_html=True)
+            row_cols[2].markdown(f"<span style='color:var(--ink); font-size:0.85rem;'>{value_str}</span>", unsafe_allow_html=True)
+            row_cols[3].markdown(f"<span style='color:{score_color}; font-weight:700; font-size:0.85rem;'>{score_emoji} {r['score']}</span>", unsafe_allow_html=True)
+            row_cols[4].markdown(f"<span style='color:{score_color}; font-weight:600; font-size:0.85rem;'>{r['band']}</span>", unsafe_allow_html=True)
+            row_cols[5].markdown(f"<span style='color:var(--muted); font-size:0.78rem;'>{top_reason}</span>", unsafe_allow_html=True)
+            if row_cols[6].button("View", key=f"view_{idx}_{inv.get('invoice_id','')}"):
+                st.session_state["selected_invoice_id"] = inv.get("invoice_id", "")
+                st.rerun()
     
     # ---- SECTION 6: Buyer-level aggregation ----
     st.markdown("---")
@@ -701,18 +689,6 @@ if data is not None:
         })
     
     st.dataframe(pd.DataFrame(buyer_display), use_container_width=True)
-    
-    # ---- Honest note ----
-    st.markdown("""
-    <div class="honest-note">
-        <strong>Honest note:</strong> This demo runs on illustrative sample data to show the scoring machinery works. 
-        It does <strong>not</strong> prove the signal is real on actual lending data — only a retrospective backtest 
-        on a real NBFC's closed loan book can prove that. That test is the ask: give us 200 of your closed MSME 
-        invoices, we'll score them blind, and we'll see together if the signal holds.
-        <br><br>
-        Built by a Physics student at IIT Bombay, researching this problem full-time.
-    </div>
-    """, unsafe_allow_html=True)
 
 else:
     # Landing state
