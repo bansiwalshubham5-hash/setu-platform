@@ -90,6 +90,40 @@ st.markdown("""
     /* Alert boxes (success/warning/error) keep readable dark text on their tint */
     [data-testid="stAlert"] p, [data-testid="stAlert"] div { color: var(--ink) !important; }
 
+    /* ---- EXTRA HARD OVERRIDE ROUND 2: catch every remaining component type
+       that can inherit a dark-mode text color from the browser/OS, no matter
+       how deeply nested. This is intentionally broad and aggressive. ---- */
+    .stApp * {
+        color: var(--ink);
+    }
+    /* Re-assert the letterhead's light text AFTER the blanket rule above,
+       so it still wins (this block must stay below the ".stApp *" rule) */
+    .stApp .setu-letterhead, .stApp .setu-letterhead * { color: var(--paper) !important; }
+    .stApp .setu-name { color: var(--paper) !important; }
+    .stApp .setu-seal { color: var(--brass-bright) !important; }
+    .stApp .setu-refno { color: rgba(245,240,228,0.55) !important; }
+    .stApp .setu-tagline { color: rgba(245,240,228,0.82) !important; }
+    .stApp .setu-tagline b { color: var(--brass-bright) !important; }
+    /* Re-assert primary button's light text */
+    .stApp button[kind="primary"] * { color: var(--paper) !important; }
+    /* Re-assert the colored reason spans */
+    .stApp span.reason-positive { color: var(--trust) !important; }
+    .stApp span.reason-negative { color: var(--risk) !important; }
+    .stApp span.reason-neutral { color: var(--muted) !important; }
+    /* Radio buttons, checkboxes, sliders, expanders, tooltips, toasts —
+       every remaining widget type gets dark ink text explicitly */
+    [data-testid="stExpander"] *, [data-testid="stRadio"] *,
+    [data-testid="stCheckbox"] *, [data-testid="stSlider"] *,
+    [data-testid="stTooltipIcon"] *, [data-testid="stToast"] *,
+    [role="tooltip"] *, [role="dialog"] * {
+        color: var(--ink) !important;
+    }
+    /* Force any remaining dark-background containers to light, so text
+       set to ink color is never stranded on a dark surface */
+    [data-testid="stExpander"], [role="dialog"], [role="tooltip"] {
+        background: #FFFFFF !important;
+    }
+
     /* The letterhead banner is dark navy — its own text must stay light.
        These selectors are deliberately made MORE specific than the global
        .stApp div/p/span rule above (which would otherwise win and force
@@ -348,7 +382,7 @@ with tab2:
 data = None
 
 if use_sample:
-    data = pd.read_csv("data/sample_invoices.csv")
+    data = pd.read_csv("sample_invoices.csv")
     st.session_state["data_loaded"] = True
 elif uploaded_file is not None:
     data = pd.read_csv(uploaded_file)
@@ -356,7 +390,7 @@ elif uploaded_file is not None:
 elif st.session_state.get("data_loaded"):
     # Keep showing results after initial load
     try:
-        data = pd.read_csv("data/sample_invoices.csv")
+        data = pd.read_csv("sample_invoices.csv")
     except:
         pass
 
