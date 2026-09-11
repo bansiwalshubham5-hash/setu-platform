@@ -405,11 +405,11 @@ st.markdown(f"""
 tab1, tab2 = st.tabs(["📊 Run Backtest on Sample Data", "📁 Upload Your Own Data"])
 
 with tab1:
-    st.markdown("**Retrospective backtest:** score 200 past auto-component invoices from the Pune-Chakan cluster. Each invoice has a known outcome (repaid or defaulted). The question: did low scores catch the real defaults?")
+    st.markdown("Score 200 real-shaped auto-component invoices from Pune-Chakan. Each one has a known result — paid or not — so you can see whether the score actually caught it.")
     use_sample = st.button("Run scoring on sample data", type="primary", key="sample_btn")
 
 with tab2:
-    st.markdown("**Upload your CSV** with columns: `invoice_id`, `buyer_name`, `invoice_value`, `buyer_past_on_time`, `buyer_past_total`, `buyer_avg_days_late`, `itc_claimed_by_buyer`, `eway_bill_present`, `buyer_turnover_trend`, and optionally `outcome` (Repaid/Defaulted) for backtest mode.")
+    st.markdown("**Upload your own invoices** — a CSV with buyer name, invoice value, and a few payment-history details. Add an outcome column if you want to check the score against real results.")
     uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"], key="upload")
 
 
@@ -443,8 +443,7 @@ if data is not None:
     
     # ---- SECTION 1: Summary metrics ----
     st.markdown("---")
-    st.markdown("### Overview — the whole batch, at a glance")
-    st.caption("A quick summary of every invoice you scored, so you can judge the overall health of this portfolio in one look.")
+    st.markdown("### Overview")
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -469,9 +468,7 @@ if data is not None:
     # ---- SECTION 2: The separation proof (only if outcomes are available) ----
     if has_outcomes:
         st.markdown("---")
-        st.markdown("### Does the score actually work?")
-        st.caption("The real test: invoices we scored as risky should have failed more often than invoices we scored as safe. This is where you check that.")
-        st.markdown("If the model works, the red (default) rate should be high in the left band and near zero on the right.")
+        st.markdown("### Summary")
         
         band_col1, band_col2, band_col3 = st.columns(3)
         
@@ -515,8 +512,7 @@ if data is not None:
     
     # ---- SECTION 3: Score distribution chart ----
     st.markdown("---")
-    st.markdown("### How scores are spread out")
-    st.caption("Shows how many invoices landed in each score range — helps you see if most invoices are safe, risky, or somewhere in between.")
+    st.markdown("### Score distribution")
     
     score_df = pd.DataFrame([{
         "Score": r["score"],
@@ -524,112 +520,153 @@ if data is not None:
         "Outcome": r["invoice"].get("outcome", "Unknown"),
     } for r in scored])
     
-    # Histogram — score distribution across bands
+    # Histogram — score distribution across bands, with clear axis labels
     bins = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
     labels = ["0-10", "11-20", "21-30", "31-40", "41-50", "51-60", "61-70", "71-80", "81-90", "91-100"]
-    score_df["Range"] = pd.cut(score_df["Score"], bins=bins, labels=labels)
-    chart_data = score_df.groupby("Range", observed=True).size().reset_index(name="Invoices")
-    chart_data["Range"] = chart_data["Range"].astype(str)
-    st.bar_chart(chart_data.set_index("Range"))
+    score_df["Score range"] = pd.cut(score_df["Score"], bins=bins, labels=labels)
+    chart_data = score_df.groupby("Score range", observed=True).size().reset_index(name="Number of invoices")
+    chart_data["Score range"] = chart_data["Score range"].astype(str)
+    st.bar_chart(chart_data.set_index("Score range"), x_label="Score range", y_label="Number of invoices")
     
     # ---- SECTION 4: Every invoice, scored ----
     st.markdown("---")
-    st.markdown("### Full list — every invoice and its score")
-    st.caption("Every invoice you scored, sorted from riskiest to safest, with the top reason for each score.")
+    st.markdown("### All invoices")
     st.markdown("Click any row to see the full reasoning.")
     
-    # Build display dataframe
-    display_data = []
+    # Build a custom HTML table instead of st.dataframe — Streamlit's built-in
+    # grid renders on a canvas element, which CSS cannot style reliably
+    # (this was the actual cause of the invisible search box and unreadable
+    # headers). A plain HTML table gives full, guaranteed control.
+    table_rows_html = ""
     for r in sorted(scored, key=lambda x: x["score"]):
         inv = r["invoice"]
         
-        # Color-coded score
         if r["score"] >= 70:
-            score_display = f"🟢 {r['score']}"
+            score_color = "var(--trust)"
+            score_emoji = "🟢"
         elif r["score"] >= 50:
-            score_display = f"🟡 {r['score']}"
+            score_color = "var(--watch)"
+            score_emoji = "🟡"
         else:
-            score_display = f"🔴 {r['score']}"
+            score_color = "var(--risk)"
+            score_emoji = "🔴"
         
-        # Top reason
         top_reason = r["reasons"][0]["text"] if r["reasons"] else ""
+        value_str = f"₹{int(float(inv.get('total_invoice_value', inv.get('invoice_value', 0)))):,}"
         
-        row = {
-            "Invoice": inv.get("invoice_id", ""),
-            "Buyer": inv.get("buyer_name", ""),
-            "Value (₹)": f"₹{int(float(inv.get('total_invoice_value', inv.get('invoice_value', 0)))):,}",
-            "Score": score_display,
-            "Band": r["band"],
-            "Top Signal": top_reason,
-        }
-        
+        outcome_cell = ""
         if has_outcomes:
             outcome = inv.get("outcome", "")
-            row["Outcome"] = f"✓ {outcome}" if outcome == "Repaid" else f"✕ {outcome}"
+            outcome_color = "var(--trust)" if outcome == "Repaid" else "var(--risk)"
+            outcome_symbol = "✓" if outcome == "Repaid" else "✕"
+            outcome_cell = f'<td style="padding:8px 10px; color:{outcome_color}; font-weight:600;">{outcome_symbol} {outcome}</td>'
         
-        display_data.append(row)
+        table_rows_html += f'''<tr style="border-top:1px solid var(--line);">
+            <td style="padding:8px 10px; color:var(--ink); font-family:\'IBM Plex Mono\',monospace;">{inv.get("invoice_id","")}</td>
+            <td style="padding:8px 10px; color:var(--ink);">{inv.get("buyer_name","")}</td>
+            <td style="padding:8px 10px; color:var(--ink); font-family:\'IBM Plex Mono\',monospace;">{value_str}</td>
+            <td style="padding:8px 10px; color:{score_color}; font-weight:700; font-family:\'IBM Plex Mono\',monospace;">{score_emoji} {r["score"]}</td>
+            <td style="padding:8px 10px; color:{score_color}; font-weight:600;">{r["band"]}</td>
+            <td style="padding:8px 10px; color:var(--muted); font-size:0.85rem;">{top_reason}</td>
+            {outcome_cell}
+        </tr>'''
     
-    st.dataframe(
-        pd.DataFrame(display_data),
-        use_container_width=True,
-        height=500,
-    )
+    outcome_header = '<th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Outcome</th>' if has_outcomes else ""
+    
+    table_html = f'''
+    <div style="max-height:500px; overflow-y:auto; border:1px solid var(--line); border-radius:8px;">
+    <table style="width:100%; border-collapse:collapse; font-family:'IBM Plex Sans',sans-serif; font-size:0.9rem;">
+        <thead style="position:sticky; top:0; z-index:1;">
+            <tr style="background:var(--ink);">
+                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Invoice</th>
+                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Buyer</th>
+                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Value</th>
+                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Score</th>
+                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Band</th>
+                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Top signal</th>
+                {outcome_header}
+            </tr>
+        </thead>
+        <tbody style="background:#FFFFFF;">
+            {table_rows_html}
+        </tbody>
+    </table>
+    </div>
+    '''
+    st.markdown(table_html, unsafe_allow_html=True)
     
     # ---- SECTION 5: Deep dive on a single invoice ----
     st.markdown("---")
-    st.markdown("### Look at one invoice closely")
-    st.caption("Pick any single invoice below to see exactly why it got the score it did, signal by signal.")
+    st.markdown("### Each invoice")
     
     invoice_ids = [r["invoice"].get("invoice_id", f"Invoice {i}") for i, r in enumerate(scored)]
-    selected_id = st.selectbox("Select an invoice to see full reasoning:", invoice_ids)
+    selected_id = st.selectbox("Choose an invoice:", invoice_ids)
     
     if selected_id:
         selected = next(r for r in scored if r["invoice"].get("invoice_id") == selected_id)
         inv = selected["invoice"]
         
-        col_a, col_b = st.columns([1, 2])
+        score_val = selected["score"]
+        if score_val >= 70:
+            score_color = "var(--trust)"
+            score_emoji = "🟢"
+        elif score_val >= 50:
+            score_color = "var(--watch)"
+            score_emoji = "🟡"
+        else:
+            score_color = "var(--risk)"
+            score_emoji = "🔴"
         
-        with col_a:
-            st.markdown(f"**Invoice:** {inv.get('invoice_id', '')}")
-            st.markdown(f"**Supplier:** {inv.get('supplier_name', '')}")
-            st.markdown(f"**Buyer:** {inv.get('buyer_name', '')}")
-            st.markdown(f"**Value:** ₹{int(float(inv.get('total_invoice_value', inv.get('invoice_value', 0)))):,}")
-            st.markdown(f"**Date:** {inv.get('invoice_date', '')}")
-            
-            score_val = selected["score"]
-            if score_val >= 70:
-                st.markdown(f"### 🟢 Score: {score_val}/100")
-            elif score_val >= 50:
-                st.markdown(f"### 🟡 Score: {score_val}/100")
+        outcome_line = ""
+        if has_outcomes:
+            outcome = inv.get("outcome", "")
+            outcome_color = "var(--trust)" if outcome == "Repaid" else "var(--risk)"
+            outcome_symbol = "✓" if outcome == "Repaid" else "✕"
+            outcome_line = f'<div style="margin-top:6px; color:{outcome_color}; font-weight:600;">{outcome_symbol} {outcome}</div>'
+        
+        reasons_html = ""
+        for reason in selected["reasons"]:
+            if reason["type"] == "positive":
+                r_color = "var(--trust)"
+                r_symbol = "✓"
+            elif reason["type"] == "negative":
+                r_color = "var(--risk)"
+                r_symbol = "✕"
             else:
-                st.markdown(f"### 🔴 Score: {score_val}/100")
-            
-            st.markdown(f"**Band:** {selected['band']}")
-            
-            if has_outcomes:
-                outcome = inv.get("outcome", "")
-                if outcome == "Repaid":
-                    st.markdown(f"**Actual outcome:** ✓ Repaid")
-                else:
-                    st.markdown(f"**Actual outcome:** ✕ Defaulted")
+                r_color = "var(--muted)"
+                r_symbol = "~"
+            reasons_html += f'<div style="padding:6px 0; color:{r_color}; font-size:0.95rem;">{r_symbol} {reason["text"]}</div>'
         
-        with col_b:
-            st.markdown("**Why this score:**")
-            for reason in selected["reasons"]:
-                if reason["type"] == "positive":
-                    st.markdown(f'<span class="reason-positive">✓ {reason["text"]}</span>', unsafe_allow_html=True)
-                elif reason["type"] == "negative":
-                    st.markdown(f'<span class="reason-negative">✕ {reason["text"]}</span>', unsafe_allow_html=True)
-                else:
-                    st.markdown(f'<span class="reason-neutral">~ {reason["text"]}</span>', unsafe_allow_html=True)
-            
-            st.markdown(f"\n**Recommendation:** {selected['recommendation']}")
+        value_str = f"₹{int(float(inv.get('total_invoice_value', inv.get('invoice_value', 0)))):,}"
+        
+        card_html = f'''
+        <div style="background:#FFFFFF; border:1px solid var(--line); border-radius:12px; padding:20px 24px; margin-top:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
+                <div>
+                    <div style="font-family:'IBM Plex Mono',monospace; font-size:0.95rem; color:var(--ink); font-weight:600;">{inv.get("invoice_id","")}</div>
+                    <div style="color:var(--muted); font-size:0.85rem; margin-top:4px;">{inv.get("supplier_name","")} → {inv.get("buyer_name","")}</div>
+                    <div style="color:var(--ink); font-size:0.9rem; margin-top:4px;">{value_str} · {inv.get("invoice_date","")}</div>
+                    {outcome_line}
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-family:'IBM Plex Mono',monospace; font-size:2rem; font-weight:700; color:{score_color};">{score_emoji} {score_val}</div>
+                    <div style="color:{score_color}; font-weight:600; font-size:0.9rem;">{selected["band"]}</div>
+                </div>
+            </div>
+            <div style="border-top:1px solid var(--line); margin-top:16px; padding-top:12px;">
+                <div style="color:var(--ink); font-weight:600; margin-bottom:6px;">Why this score</div>
+                {reasons_html}
+            </div>
+            <div style="border-top:1px solid var(--line); margin-top:12px; padding-top:12px; color:var(--ink);">
+                <b>Recommendation:</b> {selected["recommendation"]}
+            </div>
+        </div>
+        '''
+        st.markdown(card_html, unsafe_allow_html=True)
     
     # ---- SECTION 6: Buyer-level aggregation ----
     st.markdown("---")
-    st.markdown("### Which buyers are risky?")
-    st.caption("Groups all invoices by buyer, so you can see at a glance which buyers tend to pay reliably and which don't.")
-    st.markdown("Which buyers are your riskiest? Aggregated across all their invoices.")
+    st.markdown("### Most risky buyers")
     
     buyer_stats = {}
     for r in scored:
