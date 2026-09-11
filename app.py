@@ -13,8 +13,7 @@ This is the demo you open on your laptop in front of an NBFC risk officer.
 
 import streamlit as st
 import pandas as pd
-import csv
-import io
+import datetime
 from scoring_engine import score_invoice, score_batch, get_separation_stats
 
 # ---- Page config ----
@@ -26,11 +25,6 @@ st.set_page_config(
 )
 
 # ---- Design system ----
-# Concept: an official ledger / letterhead — the visual language of a verified
-# government document (IRN stamps, GST seals, passbook rules) rather than a
-# generic startup dashboard. Ink navy + brass seal accent on warm paper.
-# Display: Fraunces (certificate/letterhead serif). Body: IBM Plex Sans.
-# Data/figures: IBM Plex Mono (ledger-style numerals — GSTINs, IRNs, scores).
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
@@ -53,107 +47,123 @@ st.markdown("""
     .block-container { max-width: 1120px; padding-top: 1.2rem; }
     .stApp { background: var(--paper) !important; }
 
-    /* ---- HARD OVERRIDE: force readable dark text everywhere on the light
-       paper background. Streamlit sometimes falls back to light-on-dark
-       text depending on the browser/OS theme; these rules stop that. ---- */
     .stApp, .stApp p, .stApp span, .stApp li, .stApp label,
     .stApp div, .stMarkdown, .stMarkdown p, .stMarkdown li,
     [data-testid="stMarkdownContainer"], [data-testid="stMarkdownContainer"] p,
     [data-testid="stMarkdownContainer"] li, [data-testid="stMarkdownContainer"] span,
     [data-testid="stCaptionContainer"], .stCaption,
-    [data-testid="stSelectbox"] label, [data-testid="stFileUploader"] label,
-    [data-testid="stFileUploaderDropzone"], [data-testid="stFileUploaderDropzone"] *,
+    [data-testid="stSelectbox"] label,
     [data-testid="stWidgetLabel"] p {
         color: var(--ink) !important;
     }
     .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6 {
         color: var(--ink) !important;
     }
-    /* Muted secondary text (captions, helper text) stays legible too */
     small, .stCaption, [data-testid="stCaptionContainer"] {
         color: var(--muted) !important;
     }
+
     /* Tabs */
     .stTabs [data-baseweb="tab"] p { color: var(--ink) !important; }
     .stTabs [aria-selected="true"] p { color: var(--brass) !important; }
-    /* Selectbox selected value + dropdown options */
-    [data-baseweb="select"] * { color: var(--ink) !important; }
-    [data-baseweb="popover"] * { color: var(--ink) !important; }
-    [data-baseweb="popover"] { background: #FFFFFF !important; }
-    /* Broader catch: the dropdown/select MENU specifically (a different
-       BaseWeb element from the popover wrapper) is where black-on-black
-       options were hiding — this targets it directly and exhaustively */
-    [data-baseweb="menu"], [data-baseweb="menu"] *,
-    [role="listbox"], [role="listbox"] *,
-    [role="option"], [role="option"] *,
-    ul[data-baseweb="menu"] li {
-        background: #FFFFFF !important;
-        color: var(--ink) !important;
+    .stTabs, [data-baseweb="tab-list"], [data-baseweb="tab-panel"] {
+        background: var(--paper) !important;
+    }
+    [data-baseweb="tab-list"] button { background: transparent !important; }
+
+    /* ---- Invoice search dropdown (selectbox): this element's own
+       background has stubbornly stayed dark no matter how much we tried
+       to force it light. Instead of fighting that further, we make it a
+       deliberate dark navy field with bright white text — same treatment
+       as the letterhead — so it's guaranteed readable either way. ---- */
+    [data-baseweb="select"] {
+        background: var(--ink) !important;
+        border-radius: 6px !important;
+    }
+    [data-baseweb="select"] * {
+        color: #FFFFFF !important;
+    }
+    [data-baseweb="select"] svg {
+        fill: #FFFFFF !important;
+    }
+    [data-baseweb="popover"], [data-baseweb="menu"] {
+        background: var(--ink) !important;
+    }
+    [data-baseweb="popover"] *, [data-baseweb="menu"] *,
+    [role="listbox"] *, [role="option"] * {
+        color: #FFFFFF !important;
+    }
+    [role="option"] {
+        background: var(--ink) !important;
     }
     [role="option"]:hover, li[role="option"]:hover {
-        background: var(--paper-2) !important;
+        background: var(--ink-2) !important;
     }
-    /* Dataframe / table text */
-    [data-testid="stDataFrame"] * { color: var(--ink) !important; }
-    [data-testid="stDataFrame"] { background: #FFFFFF !important; }
-    /* Metric widgets already targeted below, reinforced here */
-    [data-testid="stMetric"] label, [data-testid="stMetric"] div { color: var(--ink) !important; }
-    /* File uploader button text */
-    /* File uploader "Browse files" button: it has Streamlit's default blue
-       background — force the text AND any icon inside it to white so it's
-       readable, instead of the ink-on-blue that was still hard to see */
+
+    /* ---- File uploader: same treatment — deliberate dark zone with
+       guaranteed bright white text and icon, not fighting the background
+       any further. ---- */
+    [data-testid="stFileUploaderDropzone"] {
+        background: var(--ink) !important;
+        border-radius: 8px !important;
+    }
+    [data-testid="stFileUploaderDropzone"] * {
+        color: #FFFFFF !important;
+    }
+    [data-testid="stFileUploaderDropzone"] svg {
+        fill: #FFFFFF !important;
+        stroke: #FFFFFF !important;
+    }
     [data-testid="stFileUploader"] button {
         color: #FFFFFF !important;
+        background: var(--ink-2) !important;
+        border: 1px solid var(--brass) !important;
     }
     [data-testid="stFileUploader"] button * {
         color: #FFFFFF !important;
         fill: #FFFFFF !important;
     }
-    [data-testid="stFileUploader"] button svg {
-        fill: #FFFFFF !important;
-        stroke: #FFFFFF !important;
-    }
-    /* Alert boxes (success/warning/error) keep readable dark text on their tint */
+
+    [data-testid="stDataFrame"] * { color: var(--ink) !important; }
+    [data-testid="stDataFrame"] { background: #FFFFFF !important; }
+    [data-testid="stMetric"] label, [data-testid="stMetric"] div { color: var(--ink) !important; }
     [data-testid="stAlert"] p, [data-testid="stAlert"] div { color: var(--ink) !important; }
 
-    /* ---- EXTRA HARD OVERRIDE ROUND 2: catch every remaining component type
-       that can inherit a dark-mode text color from the browser/OS, no matter
-       how deeply nested. This is intentionally broad and aggressive. ---- */
-    .stApp * {
-        color: var(--ink);
-    }
-    /* Re-assert the letterhead's light text AFTER the blanket rule above,
-       so it still wins (this block must stay below the ".stApp *" rule) */
+    .stApp * { color: var(--ink); }
+
+    /* Re-assert the letterhead's light text after the blanket rule above */
     .stApp .setu-letterhead, .stApp .setu-letterhead * { color: var(--paper) !important; }
     .stApp .setu-name { color: var(--paper) !important; }
     .stApp .setu-seal { color: var(--brass-bright) !important; }
     .stApp .setu-refno { color: rgba(245,240,228,0.55) !important; }
     .stApp .setu-tagline { color: rgba(245,240,228,0.82) !important; }
     .stApp .setu-tagline b { color: var(--brass-bright) !important; }
-    /* Re-assert primary button's light text */
     .stApp button[kind="primary"] * { color: var(--paper) !important; }
-    /* Re-assert the colored reason spans */
     .stApp span.reason-positive { color: var(--trust) !important; }
     .stApp span.reason-negative { color: var(--risk) !important; }
     .stApp span.reason-neutral { color: var(--muted) !important; }
-    /* Radio buttons, checkboxes, sliders, expanders, tooltips, toasts —
-       every remaining widget type gets dark ink text explicitly */
+
+    /* Re-assert white text on the dark dropdown/uploader AFTER the blanket
+       rule above, so those specific fixes still win */
+    .stApp [data-baseweb="select"] *,
+    .stApp [data-baseweb="popover"] *,
+    .stApp [data-baseweb="menu"] *,
+    .stApp [role="option"] *,
+    .stApp [data-testid="stFileUploaderDropzone"] *,
+    .stApp [data-testid="stFileUploader"] button * {
+        color: #FFFFFF !important;
+    }
+
     [data-testid="stExpander"] *, [data-testid="stRadio"] *,
     [data-testid="stCheckbox"] *, [data-testid="stSlider"] *,
     [data-testid="stTooltipIcon"] *, [data-testid="stToast"] *,
     [role="tooltip"] *, [role="dialog"] * {
         color: var(--ink) !important;
     }
-    /* Force any remaining dark-background containers to light, so text
-       set to ink color is never stranded on a dark surface */
     [data-testid="stExpander"], [role="dialog"], [role="tooltip"] {
         background: #FFFFFF !important;
     }
 
-    /* ---- ROUND 3: eliminate ANY remaining black background patches,
-       wherever they come from (browser dark-mode defaults on unstyled
-       containers, iframes, etc.) by forcing every generic container
-       and the base HTML/body to the light paper color explicitly. ---- */
     html, body {
         background: var(--paper) !important;
         color-scheme: light !important;
@@ -164,27 +174,6 @@ st.markdown("""
     section[data-testid="stSidebar"] {
         background: var(--paper) !important;
     }
-    /* Tabs container specifically (a common source of a stray dark strip) */
-    .stTabs, [data-baseweb="tab-list"], [data-baseweb="tab-panel"] {
-        background: var(--paper) !important;
-    }
-    [data-baseweb="tab-list"] button {
-        background: transparent !important;
-    }
-
-    /* The letterhead banner is dark navy — its own text must stay light.
-       These selectors are deliberately made MORE specific than the global
-       .stApp div/p/span rule above (which would otherwise win and force
-       invisible navy-on-navy text here). */
-    .stApp .setu-letterhead,
-    .stApp .setu-letterhead * {
-        color: var(--paper) !important;
-    }
-    .stApp .setu-name { color: var(--paper) !important; }
-    .stApp .setu-seal { color: var(--brass-bright) !important; }
-    .stApp .setu-refno { color: rgba(245,240,228,0.55) !important; }
-    .stApp .setu-tagline { color: rgba(245,240,228,0.82) !important; }
-    .stApp .setu-tagline b { color: var(--brass-bright) !important; }
 
     /* ---- Letterhead banner ---- */
     .setu-letterhead {
@@ -213,11 +202,7 @@ st.markdown("""
         align-items: center;
         margin-bottom: 14px;
     }
-    .setu-wordmark {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-    }
+    .setu-wordmark { display: flex; align-items: center; gap: 12px; }
     .setu-seal {
         width: 40px; height: 40px;
         border-radius: 50%;
@@ -256,33 +241,10 @@ st.markdown("""
     }
     .setu-tagline b { color: var(--brass-bright); font-weight: 600; }
 
-    .main-header { display: none; }
-    .sub-header { display: none; }
-
     h3 {
         font-family: 'Fraunces', serif !important;
         font-weight: 600 !important;
         color: var(--ink) !important;
-    }
-
-    .metric-card {
-        background: #FFFFFF;
-        border-radius: 8px;
-        padding: 18px;
-        border: 1px solid var(--line);
-    }
-    .metric-value {
-        font-family: 'IBM Plex Mono', monospace;
-        font-size: 1.9rem;
-        font-weight: 700;
-        line-height: 1.2;
-        color: var(--ink);
-    }
-    .metric-label {
-        font-size: 0.75rem;
-        color: var(--muted);
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
     }
 
     [data-testid="stMetric"] {
@@ -295,47 +257,27 @@ st.markdown("""
         font-family: 'IBM Plex Mono', monospace !important;
         color: var(--ink) !important;
     }
-    [data-testid="stMetricLabel"] {
-        color: var(--muted) !important;
-    }
+    [data-testid="stMetricLabel"] { color: var(--muted) !important; }
 
     .band-high-risk {
         border-left: 4px solid var(--risk);
-        padding-left: 12px;
-        background: #FFFFFF;
-        border-radius: 0 8px 8px 0;
-        padding-top: 4px; padding-bottom: 4px;
+        padding-left: 12px; background: #FFFFFF;
+        border-radius: 0 8px 8px 0; padding-top: 4px; padding-bottom: 4px;
     }
     .band-watch {
         border-left: 4px solid var(--watch);
-        padding-left: 12px;
-        background: #FFFFFF;
-        border-radius: 0 8px 8px 0;
-        padding-top: 4px; padding-bottom: 4px;
+        padding-left: 12px; background: #FFFFFF;
+        border-radius: 0 8px 8px 0; padding-top: 4px; padding-bottom: 4px;
     }
     .band-high-trust {
         border-left: 4px solid var(--trust);
-        padding-left: 12px;
-        background: #FFFFFF;
-        border-radius: 0 8px 8px 0;
-        padding-top: 4px; padding-bottom: 4px;
+        padding-left: 12px; background: #FFFFFF;
+        border-radius: 0 8px 8px 0; padding-top: 4px; padding-bottom: 4px;
     }
 
-    .reason-positive, .stApp span.reason-positive { color: var(--trust) !important; font-family: 'IBM Plex Sans', sans-serif; }
-    .reason-negative, .stApp span.reason-negative { color: var(--risk) !important; font-family: 'IBM Plex Sans', sans-serif; }
-    .reason-neutral, .stApp span.reason-neutral { color: var(--muted) !important; font-family: 'IBM Plex Sans', sans-serif; }
-
-    .score-badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 4px;
-        font-weight: 700;
-        font-size: 0.9rem;
-        font-family: 'IBM Plex Mono', monospace;
-    }
-    .score-high { background: rgba(47,110,91,0.12); color: var(--trust); }
-    .score-mid { background: rgba(184,134,46,0.14); color: var(--watch); }
-    .score-low { background: rgba(166,67,46,0.12); color: var(--risk); }
+    .reason-positive, .stApp span.reason-positive { color: var(--trust) !important; }
+    .reason-negative, .stApp span.reason-negative { color: var(--risk) !important; }
+    .reason-neutral, .stApp span.reason-neutral { color: var(--muted) !important; }
 
     hr { border-color: var(--line) !important; }
 
@@ -344,9 +286,6 @@ st.markdown("""
         font-weight: 600;
         border-radius: 6px;
     }
-    /* Primary button: navy background NEEDS light text — the global dark-text
-       rule above would otherwise force navy text onto this navy button,
-       making it invisible. This must come after and win. */
     .stButton > button[kind="primary"] {
         background: var(--ink) !important;
         border: 1px solid var(--brass) !important;
@@ -360,8 +299,6 @@ st.markdown("""
         background: var(--ink-2) !important;
         border-color: var(--brass-bright) !important;
     }
-    /* Secondary/default button: white background, dark text (already
-       readable via the global rule, reinforced explicitly here) */
     .stButton > button:not([kind="primary"]) {
         background: #FFFFFF !important;
         border: 1px solid var(--line) !important;
@@ -371,29 +308,11 @@ st.markdown("""
     .stButton > button:not([kind="primary"]) span {
         color: var(--ink) !important;
     }
-
-    .stTabs [data-baseweb="tab"] {
-        font-family: 'IBM Plex Sans', sans-serif;
-        font-weight: 600;
-    }
-
-    .honest-note {
-        background: #FFFFFF;
-        border: 1px solid var(--line);
-        border-left: 3px solid var(--brass);
-        border-radius: 6px;
-        padding: 18px 20px;
-        font-size: 0.85rem;
-        color: var(--ink-2);
-        margin-top: 2rem;
-        line-height: 1.6;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ---- Header: the letterhead ----
-import datetime
 _ref = datetime.datetime.now().strftime("REF SETU/%Y%m%d/DEMO")
 st.markdown(f"""
 <div class="setu-letterhead">
@@ -402,7 +321,7 @@ st.markdown(f"""
             <div class="setu-seal">S</div>
             <div class="setu-name">Setu</div>
         </div>
-        <div class="setu-refno">{_ref}<br>Invoice Trust Score · v0.2</div>
+        <div class="setu-refno">{_ref}<br>Invoice Trust Score · v0.3</div>
     </div>
     <div class="setu-tagline">
         Predicts whether a manufacturing invoice will be repaid — using <b>GST e-invoice</b>,
@@ -413,18 +332,13 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 
+# ---- Data source selection — back to switchable tabs, minimal text ----
+tab1, tab2 = st.tabs(["Run on sample data", "Upload your own data"])
 
-# ---- Data source selection — both options visible at once, no hidden tabs ----
-col_left, col_right = st.columns(2)
-
-with col_left:
-    st.markdown("**Run on sample data**")
-    st.markdown("Score 200 real-shaped auto-component invoices from Pune-Chakan. Each one has a known result — paid or not — so you can see whether the score actually caught it.")
+with tab1:
     use_sample = st.button("Run scoring on sample data", type="primary", key="sample_btn")
 
-with col_right:
-    st.markdown("**Upload your own data**")
-    st.markdown("A CSV with buyer name, invoice value, and a few payment-history details. Add an outcome column if you want to check the score against real results.")
+with tab2:
     uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"], key="upload")
 
 
@@ -438,149 +352,202 @@ elif uploaded_file is not None:
     data = pd.read_csv(uploaded_file)
     st.session_state["data_loaded"] = True
 elif st.session_state.get("data_loaded"):
-    # Keep showing results after initial load
     try:
         data = pd.read_csv("sample_invoices.csv")
-    except:
+    except Exception:
         pass
 
 if data is not None:
-    # Convert to list of dicts for scoring
     invoices = data.to_dict("records")
-    
-    # Score all invoices
     scored = score_batch(invoices)
-    
-    # Get separation stats
+
     has_outcomes = "outcome" in data.columns
     if has_outcomes:
         stats = get_separation_stats(scored)
-    
+
     # ---- SECTION 1: Summary metrics ----
     st.markdown("---")
     st.markdown("### Overview")
-    
+
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
         st.metric("Invoices Scored", len(scored))
-    
+
     with col2:
         avg_score = round(sum(r["score"] for r in scored) / len(scored), 1)
         st.metric("Average Trust Score", f"{avg_score}/100")
-    
+
     with col3:
         high_risk_count = sum(1 for r in scored if r["band"] == "High Risk")
         st.metric("High Risk Invoices", f"{high_risk_count} ({round(100*high_risk_count/len(scored))}%)")
-    
+
     with col4:
         if has_outcomes:
             st.metric("Defaults Caught in Low Band", f"{stats['catch_rate']}%")
         else:
             high_trust_count = sum(1 for r in scored if r["band"] == "High Trust")
             st.metric("High Trust Invoices", f"{high_trust_count} ({round(100*high_trust_count/len(scored))}%)")
-    
-    # ---- SECTION 2: The separation proof (only if outcomes are available) ----
+
+    # ---- SECTION 2: The separation proof ----
     if has_outcomes:
         st.markdown("---")
         st.markdown("### Summary")
-        
+
         band_col1, band_col2, band_col3 = st.columns(3)
-        
+
         with band_col1:
             band_data = stats["bands"]["High Risk"]
             st.markdown('<div class="band-high-risk">', unsafe_allow_html=True)
-            st.markdown(f"**🔴 High Risk (Score 0-49)**")
+            st.markdown("**🔴 High Risk (Score 0-49)**")
             st.markdown(f"**{band_data['total']}** invoices")
             st.markdown(f"**{band_data['default_rate']}%** defaulted")
             st.markdown(f"Avg score: {band_data['avg_score']}")
             st.progress(min(band_data['default_rate'] / 100, 1.0))
             st.markdown('</div>', unsafe_allow_html=True)
-        
+
         with band_col2:
             band_data = stats["bands"]["Watch"]
             st.markdown('<div class="band-watch">', unsafe_allow_html=True)
-            st.markdown(f"**🟡 Watch (Score 50-69)**")
+            st.markdown("**🟡 Watch (Score 50-69)**")
             st.markdown(f"**{band_data['total']}** invoices")
             st.markdown(f"**{band_data['default_rate']}%** defaulted")
             st.markdown(f"Avg score: {band_data['avg_score']}")
             st.progress(min(band_data['default_rate'] / 100, 1.0))
             st.markdown('</div>', unsafe_allow_html=True)
-        
+
         with band_col3:
             band_data = stats["bands"]["High Trust"]
             st.markdown('<div class="band-high-trust">', unsafe_allow_html=True)
-            st.markdown(f"**🟢 High Trust (Score 70-100)**")
+            st.markdown("**🟢 High Trust (Score 70-100)**")
             st.markdown(f"**{band_data['total']}** invoices")
             st.markdown(f"**{band_data['default_rate']}%** defaulted")
             st.markdown(f"Avg score: {band_data['avg_score']}")
             st.progress(min(band_data['default_rate'] / 100, 1.0))
             st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Verdict
+
         if stats["catch_rate"] >= 60:
-            st.success(f"**Signal confirmed:** {stats['catch_rate']}% of defaults landed in the High Risk band. The High Trust band had a {stats['bands']['High Trust']['default_rate']}% default rate. This score separates repaid from defaulted invoices — the same test, run on your actual loan book, would prove whether this works on real data.")
+            st.success(f"**Signal confirmed:** {stats['catch_rate']}% of defaults landed in the High Risk band. The High Trust band had a {stats['bands']['High Trust']['default_rate']}% default rate.")
         elif stats["catch_rate"] >= 40:
-            st.warning(f"**Partial signal:** {stats['catch_rate']}% of defaults caught. The separation exists but is moderate. Worth testing on real data to see if it strengthens.")
+            st.warning(f"**Partial signal:** {stats['catch_rate']}% of defaults caught.")
         else:
-            st.error(f"**Weak signal:** Only {stats['catch_rate']}% of defaults caught. The score does not separate well on this data.")
-    
+            st.error(f"**Weak signal:** Only {stats['catch_rate']}% of defaults caught.")
+
     # ---- SECTION 3: Score distribution chart ----
     st.markdown("---")
     st.markdown("### Score distribution")
-    
+
     score_df = pd.DataFrame([{
         "Score": r["score"],
         "Band": r["band"],
         "Outcome": r["invoice"].get("outcome", "Unknown"),
     } for r in scored])
-    
-    # Histogram — score distribution across bands, with clear axis labels
+
     bins = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
     labels = ["0-10", "11-20", "21-30", "31-40", "41-50", "51-60", "61-70", "71-80", "81-90", "91-100"]
     score_df["Score range"] = pd.cut(score_df["Score"], bins=bins, labels=labels)
     chart_data = score_df.groupby("Score range", observed=True).size().reset_index(name="Number of invoices")
     chart_data["Score range"] = chart_data["Score range"].astype(str)
     st.bar_chart(chart_data.set_index("Score range"), x_label="Score range", y_label="Number of invoices")
-    
-    # ---- SECTION 4+5 combined: All invoices, click through to detail ----
+
+    # ---- SECTION 4: Every invoice, scored (custom table, not canvas grid) ----
     st.markdown("---")
-    
-    def render_invoice_card(selected, inv, has_outcomes):
+    st.markdown("### All invoices")
+    st.markdown("Click any row to see the full reasoning.")
+
+    table_rows_html = ""
+    for r in sorted(scored, key=lambda x: x["score"]):
+        inv = r["invoice"]
+        if r["score"] >= 70:
+            score_color, score_emoji = "var(--trust)", "🟢"
+        elif r["score"] >= 50:
+            score_color, score_emoji = "var(--watch)", "🟡"
+        else:
+            score_color, score_emoji = "var(--risk)", "🔴"
+
+        top_reason = r["reasons"][0]["text"] if r["reasons"] else ""
+        value_str = f"₹{int(float(inv.get('total_invoice_value', inv.get('invoice_value', 0)))):,}"
+
+        outcome_cell = ""
+        if has_outcomes:
+            outcome = inv.get("outcome", "")
+            outcome_color = "var(--trust)" if outcome == "Repaid" else "var(--risk)"
+            outcome_symbol = "✓" if outcome == "Repaid" else "✕"
+            outcome_cell = f'<td style="padding:8px 10px; color:{outcome_color}; font-weight:600;">{outcome_symbol} {outcome}</td>'
+
+        table_rows_html += f'''<tr style="border-top:1px solid var(--line);">
+            <td style="padding:8px 10px; color:var(--ink); font-family:'IBM Plex Mono',monospace;">{inv.get("invoice_id","")}</td>
+            <td style="padding:8px 10px; color:var(--ink);">{inv.get("buyer_name","")}</td>
+            <td style="padding:8px 10px; color:var(--ink); font-family:'IBM Plex Mono',monospace;">{value_str}</td>
+            <td style="padding:8px 10px; color:{score_color}; font-weight:700; font-family:'IBM Plex Mono',monospace;">{score_emoji} {r["score"]}</td>
+            <td style="padding:8px 10px; color:{score_color}; font-weight:600;">{r["band"]}</td>
+            <td style="padding:8px 10px; color:var(--muted); font-size:0.85rem;">{top_reason}</td>
+            {outcome_cell}
+        </tr>'''
+
+    outcome_header = '<th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Outcome</th>' if has_outcomes else ""
+
+    table_html = f'''
+    <div style="max-height:500px; overflow-y:auto; border:1px solid var(--line); border-radius:8px;">
+    <table style="width:100%; border-collapse:collapse; font-family:'IBM Plex Sans',sans-serif; font-size:0.9rem;">
+        <thead style="position:sticky; top:0; z-index:1;">
+            <tr style="background:var(--ink);">
+                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Invoice</th>
+                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Buyer</th>
+                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Value</th>
+                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Score</th>
+                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Band</th>
+                <th style="padding:10px; text-align:left; color:#FFFFFF; font-weight:700;">Top signal</th>
+                {outcome_header}
+            </tr>
+        </thead>
+        <tbody style="background:#FFFFFF;">
+            {table_rows_html}
+        </tbody>
+    </table>
+    </div>
+    '''
+    st.markdown(table_html, unsafe_allow_html=True)
+
+    # ---- SECTION 5: Deep dive on a single invoice — searchable selectbox restored ----
+    st.markdown("---")
+    st.markdown("### Each invoice")
+
+    invoice_ids = [r["invoice"].get("invoice_id", f"Invoice {i}") for i, r in enumerate(scored)]
+    selected_id = st.selectbox("Search for an invoice:", invoice_ids)
+
+    if selected_id:
+        selected = next(r for r in scored if r["invoice"].get("invoice_id") == selected_id)
+        inv = selected["invoice"]
+
         score_val = selected["score"]
         if score_val >= 70:
-            score_color = "var(--trust)"
-            score_emoji = "🟢"
+            score_color, score_emoji = "var(--trust)", "🟢"
         elif score_val >= 50:
-            score_color = "var(--watch)"
-            score_emoji = "🟡"
+            score_color, score_emoji = "var(--watch)", "🟡"
         else:
-            score_color = "var(--risk)"
-            score_emoji = "🔴"
-        
+            score_color, score_emoji = "var(--risk)", "🔴"
+
         outcome_line = ""
         if has_outcomes:
             outcome = inv.get("outcome", "")
             outcome_color = "var(--trust)" if outcome == "Repaid" else "var(--risk)"
             outcome_symbol = "✓" if outcome == "Repaid" else "✕"
             outcome_line = f'<div style="margin-top:6px; color:{outcome_color}; font-weight:600;">{outcome_symbol} {outcome}</div>'
-        
+
         reasons_html = ""
         for reason in selected["reasons"]:
             if reason["type"] == "positive":
-                r_color = "var(--trust)"
-                r_symbol = "✓"
+                r_color, r_symbol = "var(--trust)", "✓"
             elif reason["type"] == "negative":
-                r_color = "var(--risk)"
-                r_symbol = "✕"
+                r_color, r_symbol = "var(--risk)", "✕"
             else:
-                r_color = "var(--muted)"
-                r_symbol = "~"
+                r_color, r_symbol = "var(--muted)", "~"
             reasons_html += f'<div style="padding:6px 0; color:{r_color}; font-size:0.95rem;">{r_symbol} {reason["text"]}</div>'
-        
+
         value_str = f"₹{int(float(inv.get('total_invoice_value', inv.get('invoice_value', 0)))):,}"
-        
-        return f'''
+
+        card_html = f'''
         <div style="background:#FFFFFF; border:1px solid var(--line); border-radius:12px; padding:20px 24px; margin-top:8px;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
                 <div>
@@ -603,59 +570,12 @@ if data is not None:
             </div>
         </div>
         '''
-    
-    if "selected_invoice_id" not in st.session_state:
-        st.session_state["selected_invoice_id"] = None
-    
-    if st.session_state["selected_invoice_id"]:
-        # ---- Detail view for one invoice ----
-        st.markdown("### Invoice detail")
-        if st.button("← Back to all invoices"):
-            st.session_state["selected_invoice_id"] = None
-            st.rerun()
-        
-        selected = next((r for r in scored if r["invoice"].get("invoice_id") == st.session_state["selected_invoice_id"]), None)
-        if selected:
-            inv = selected["invoice"]
-            st.markdown(render_invoice_card(selected, inv, has_outcomes), unsafe_allow_html=True)
-    
-    else:
-        # ---- Table view — click View on any row to open its detail ----
-        st.markdown("### All invoices")
-        st.markdown("Click **View** on any row to see the full reasoning.")
-        
-        header_cols = st.columns([1.3, 1.6, 1, 0.8, 1, 2, 0.7])
-        headers = ["Invoice", "Buyer", "Value", "Score", "Band", "Top signal", ""]
-        for c, h in zip(header_cols, headers):
-            c.markdown(f"<div style='background:var(--ink); color:#FFFFFF; padding:6px 8px; font-weight:700; font-size:0.8rem; border-radius:4px;'>{h}</div>", unsafe_allow_html=True)
-        
-        for idx, r in enumerate(sorted(scored, key=lambda x: x["score"])):
-            inv = r["invoice"]
-            if r["score"] >= 70:
-                score_color = "var(--trust)"; score_emoji = "🟢"
-            elif r["score"] >= 50:
-                score_color = "var(--watch)"; score_emoji = "🟡"
-            else:
-                score_color = "var(--risk)"; score_emoji = "🔴"
-            
-            top_reason = r["reasons"][0]["text"] if r["reasons"] else ""
-            value_str = f"₹{int(float(inv.get('total_invoice_value', inv.get('invoice_value', 0)))):,}"
-            
-            row_cols = st.columns([1.3, 1.6, 1, 0.8, 1, 2, 0.7])
-            row_cols[0].markdown(f"<span style='color:var(--ink); font-family:monospace; font-size:0.85rem;'>{inv.get('invoice_id','')}</span>", unsafe_allow_html=True)
-            row_cols[1].markdown(f"<span style='color:var(--ink); font-size:0.85rem;'>{inv.get('buyer_name','')}</span>", unsafe_allow_html=True)
-            row_cols[2].markdown(f"<span style='color:var(--ink); font-size:0.85rem;'>{value_str}</span>", unsafe_allow_html=True)
-            row_cols[3].markdown(f"<span style='color:{score_color}; font-weight:700; font-size:0.85rem;'>{score_emoji} {r['score']}</span>", unsafe_allow_html=True)
-            row_cols[4].markdown(f"<span style='color:{score_color}; font-weight:600; font-size:0.85rem;'>{r['band']}</span>", unsafe_allow_html=True)
-            row_cols[5].markdown(f"<span style='color:var(--muted); font-size:0.78rem;'>{top_reason}</span>", unsafe_allow_html=True)
-            if row_cols[6].button("View", key=f"view_{idx}_{inv.get('invoice_id','')}"):
-                st.session_state["selected_invoice_id"] = inv.get("invoice_id", "")
-                st.rerun()
-    
+        st.markdown(card_html, unsafe_allow_html=True)
+
     # ---- SECTION 6: Buyer-level aggregation ----
     st.markdown("---")
     st.markdown("### Most risky buyers")
-    
+
     buyer_stats = {}
     for r in scored:
         buyer = r["invoice"].get("buyer_name", "Unknown")
@@ -666,19 +586,19 @@ if data is not None:
         buyer_stats[buyer]["total_value"] += float(r["invoice"].get("total_invoice_value", r["invoice"].get("invoice_value", 0)))
         if r["invoice"].get("outcome", "").lower() in ("defaulted", "default"):
             buyer_stats[buyer]["defaults"] += 1
-    
+
     buyer_display = []
     for buyer, bdata in sorted(buyer_stats.items(), key=lambda x: sum(x[1]["scores"])/len(x[1]["scores"])):
         avg = round(sum(bdata["scores"]) / len(bdata["scores"]), 1)
         def_rate = round(100 * bdata["defaults"] / bdata["total"], 1) if bdata["total"] > 0 else 0
-        
+
         if avg >= 70:
             risk_indicator = "🟢 Low Risk"
         elif avg >= 50:
             risk_indicator = "🟡 Watch"
         else:
             risk_indicator = "🔴 High Risk"
-        
+
         buyer_display.append({
             "Buyer": buyer,
             "Avg Score": avg,
@@ -687,24 +607,20 @@ if data is not None:
             "Total Exposure (₹)": f"₹{int(bdata['total_value']):,}",
             "Default Rate": f"{def_rate}%",
         })
-    
+
     st.dataframe(pd.DataFrame(buyer_display), use_container_width=True)
 
 else:
-    # Landing state
     st.markdown("---")
-    st.markdown("### How It Works")
-    
+    st.markdown("### How it works")
+
     st.markdown("""
     **The problem:** NBFCs want to lend to Tier-2/3 manufacturing suppliers but can't tell which invoices are safe to fund.
-    
-    **What Setu does:** reads five signals from the supplier's own consented data — the buyer's payment history, ITC claim status, 
-    e-way bill dispatch proof, payment speed, and turnover trend — and produces a score per invoice predicting whether the buyer will pay.
-    
-    **What's different:** existing platforms score the *company*. Setu scores each *invoice separately* — because the same supplier 
-    might have a safe invoice to a reliable buyer and a risky invoice to a shaky buyer.
-    
+
+    **What Setu does:** reads signals from the supplier's own consented data — the buyer's payment history, ITC claim status,
+    e-way bill dispatch and closure, and GST filing pattern — and produces a score per invoice predicting whether the buyer will pay.
+
     **No buyer cooperation needed.** Every signal comes from the supplier's own GST data and Account Aggregator consent.
-    
-    👈 **Click "Run scoring on sample data" above** to see it work on 200 real-shaped auto-component invoices from the Pune-Chakan cluster.
+
+    👈 Click a tab above to get started.
     """)
